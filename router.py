@@ -1,16 +1,13 @@
 import json
 import asyncio
+
 import websockets
 from collections import deque
 from websockets.exceptions import ConnectionClosedError
 
-from communication_protocol.communication_protocol import DeviceMessage
 from communication_protocol.message import (
-    health_check_request,
     device_disconnect_request,
 )
-from communication_protocol.message_event import MessageEvent
-from communication_protocol.message_type import MessageType
 
 
 class Router:
@@ -28,10 +25,11 @@ class Router:
             data = json.loads(message_json)
             mac = data["device_id"]
             try:
-                self.devices_message[mac].append(json.dumps(message_json))
-                self.devices_event[mac].set()
+                if mac in self.devices_message:
+                    self.devices_message[mac].append(json.dumps(message_json))
+                    self.devices_event[mac].set()
             except KeyError:
-                print(self.devices_message)
+                print("KeyError",self.devices_message)
 
     async def send_to_server(self, websocket: websockets.ClientConnection):
         while True:
@@ -41,7 +39,7 @@ class Router:
                 continue
             message = self.to_server_queue.popleft()
             await websocket.send(message)
-            print(f"Wysłano do serwera: {message}")
+            # print(f"Wysłano do serwera: {message}")
 
     async def connect_to_server(self):
         while True:
@@ -63,26 +61,41 @@ class Router:
                 continue
 
     async def send_to_device(self, mac: str, writer: asyncio.StreamWriter):
-        while not self.devices_connection[mac]["writer"].is_closing():
+        while self.devices_connection[mac]:
             if self.devices_message[mac]:
                 message = self.devices_message[mac].popleft()
                 writer.write(message.encode())
                 await writer.drain()
-                print(f"Wysłano do {mac}: {message}")
+                # print(f"Wysłano do {mac}: {message}")
             await asyncio.sleep(0.1)
 
-    async def receive_from_device(self, mac: str, reader: asyncio.StreamReader):
-        while not self.devices_connection[mac]["writer"].is_closing():
-            data = await reader.read(1024)  # Odczyt danych od klienta
-            if not data:
+    async def receive_from_device(self, mac: str, reader: asyncio.StreamReader,writer: asyncio.StreamWriter):
+        while self.devices_connection[mac]:
+            try:
+                data = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+                if not data:
+                    print("Brak danych")
+                    self.devices_connection[mac] = False
+                    return
+                if data == b"P":
+                    writer.write(b"P")
+                    await writer.drain()
+                    continue
+                message = data.decode()
+                idx = message.find("{")
+                message = message[idx:]
+                print(message)
+                self.to_server_queue.append(message)
+                self.server_event.set()
+            except Exception as e:
+                print(e)
+                self.devices_connection[mac] = False
                 return
-            message = data.decode()
-            self.to_server_queue.append(message)
-            self.server_event.set()
 
     async def handle_device(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ):
+        print("Nowe połączenie z urządzeniem")
         try:
             initial_data = await asyncio.wait_for(reader.read(1024), timeout=5.0)
             if not initial_data:
@@ -105,20 +118,13 @@ class Router:
             return
         print(f"Podłączono urządzenie: {mac}")
 
-        if mac in self.devices_connection:
-            await self._close_old_connection(mac)
-
         self.devices_message[mac] = deque()
         self.devices_event[mac] = asyncio.Event()
+        self.devices_connection[mac] = True
         self.to_server_queue.append(initial_data)
         self.server_event.set()
         send_task = asyncio.create_task(self.send_to_device(mac, writer))
-        receive_task = asyncio.create_task(self.receive_from_device(mac, reader))
-        self.devices_connection[mac] = {
-            "writer": writer,
-            "send_to_device": send_task,
-            "receive_from_device": receive_task,
-        }
+        receive_task = asyncio.create_task(self.receive_from_device(mac, reader,writer))
         try:
             await asyncio.gather(send_task, receive_task, return_exceptions=True)
         except Exception as e:
@@ -126,14 +132,14 @@ class Router:
         except asyncio.CancelledError:
             print(f"Urządzenie {mac} rozłączone")
         finally:
-            # Usuń urządzenie po rozłączeniu
             print(f"brak komunikacji z {mac}")
-            if self.devices_connection[mac]["writer"].is_closing():
-                if mac in self.devices_message:
-                    del self.devices_message[mac]
-                if mac in self.devices_event:
-                    del self.devices_event[mac]
-                self.to_server_queue.append(device_disconnect_request(mac).to_json())
+            if mac in self.devices_message:
+                del self.devices_message[mac]
+            if mac in self.devices_event:
+                del self.devices_event[mac]
+            if mac in self.devices_connection:
+                del self.devices_connection[mac]
+            self.to_server_queue.append(device_disconnect_request(mac).to_json())
             self.server_event.set()
             try:
                 writer.close()
@@ -147,40 +153,9 @@ class Router:
         async with server:
             await server.serve_forever()
 
-    async def check_device(self):
-        while True:
-            for mac in self.devices_connection:
-                message = health_check_request(mac)
-                if mac in self.devices_message:
-                    self.devices_message[mac].append(json.dumps(message.to_json()))
-                if mac in self.devices_event:
-                    self.devices_event[mac].set()
-            await asyncio.sleep(60)
-
-    async def _close_old_connection(self, mac: str):
-        self.devices_connection[mac]["writer"].close()
-        await self.devices_connection[mac]["writer"].wait_closed()
-        self.devices_connection[mac]["send_to_device"].cancel()
-        self.devices_connection[mac]["receive_from_device"].cancel()
-        try:
-            await asyncio.gather(
-                self.devices_connection[mac]["send_to_device"],
-                self.devices_connection[mac]["receive_from_device"],
-                return_exceptions=True,
-            )
-        except asyncio.CancelledError:
-            pass
-
-        del self.devices_connection[mac]
-        if mac in self.devices_message:
-            del self.devices_message[mac]
-        if mac in self.devices_event:
-            del self.devices_event[mac]
-
-
 async def main(router: Router):
     await asyncio.gather(
-        router.connect_to_server(), router.device_server(), router.check_device()
+        router.connect_to_server(), router.device_server()
     )
 
 
