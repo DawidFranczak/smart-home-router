@@ -3,6 +3,8 @@ import asyncio
 
 import websockets
 from collections import deque
+
+from websockets import InvalidStatus
 from websockets.exceptions import ConnectionClosedError
 
 from communication_protocol.message import (
@@ -17,7 +19,8 @@ class Router:
         self.devices_connection = {}
         self.server_event = asyncio.Event()
         self.to_server_queue = deque()
-        self.uri = "ws://192.168.1.143:8000/ws/router/1234/"
+        self.uri = "wss://dashing-cod-pretty.ngrok-free.app/ws/router/1234/"
+        # self.uri = "ws://192.168.1.142:8000/ws/router/1234/"
 
     async def receive_from_server(self, websocket: websockets.ClientConnection):
         async for message in websocket:
@@ -51,15 +54,18 @@ class Router:
                         self.receive_from_server(websocket)
                     )
                     await asyncio.gather(send_to_server, receive_from_server)
-            except ConnectionClosedError:
+            except ConnectionClosedError or ConnectionRefusedError :
                 print("Przerwano połączenie z serwerem. Próba połączenia za 5 sekund.")
                 await asyncio.sleep(1)
                 continue
-            except ConnectionRefusedError:
-                print("Odrzucono połączenie z serwerem. Próba połączenia za 5 sekund.")
-                await asyncio.sleep(1)
+            except InvalidStatus as e:
+                print(e)
+                await asyncio.sleep(5)
                 continue
-
+            except Exception as e:
+                print(e)
+                await asyncio.sleep(5)
+                continue
     async def send_to_device(self, mac: str, writer: asyncio.StreamWriter):
         while self.devices_connection[mac]:
             if self.devices_message[mac]:
@@ -72,7 +78,7 @@ class Router:
     async def receive_from_device(self, mac: str, reader: asyncio.StreamReader,writer: asyncio.StreamWriter):
         while self.devices_connection[mac]:
             try:
-                data = await asyncio.wait_for(reader.read(1024), timeout=1.0)
+                data = await asyncio.wait_for(reader.read(1024), timeout=2.0)
                 if not data:
                     print("Brak danych")
                     self.devices_connection[mac] = False
