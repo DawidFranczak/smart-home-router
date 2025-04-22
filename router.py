@@ -19,8 +19,8 @@ class Router:
         self.devices_connection = {}
         self.server_event = asyncio.Event()
         self.to_server_queue = deque()
-        self.uri = "wss://dashing-cod-pretty.ngrok-free.app/ws/router/1234/"
-        # self.uri = "ws://192.168.1.142:8000/ws/router/1234/"
+        # self.uri = "wss://dashing-cod-pretty.ngrok-free.app/ws/router/1234/"
+        self.uri = "ws://192.168.1.142:8000/ws/router/1234/"
 
     async def receive_from_server(self, websocket: websockets.ClientConnection):
         async for message in websocket:
@@ -66,6 +66,7 @@ class Router:
                 print(e)
                 await asyncio.sleep(5)
                 continue
+
     async def send_to_device(self, mac: str, writer: asyncio.StreamWriter):
         while self.devices_connection[mac]:
             if self.devices_message[mac]:
@@ -78,7 +79,7 @@ class Router:
     async def receive_from_device(self, mac: str, reader: asyncio.StreamReader,writer: asyncio.StreamWriter):
         while self.devices_connection[mac]:
             try:
-                data = await asyncio.wait_for(reader.read(1024), timeout=2.0)
+                data = await asyncio.wait_for(reader.read(1024), timeout=10.0)
                 if not data:
                     print("Brak danych")
                     self.devices_connection[mac] = False
@@ -90,7 +91,6 @@ class Router:
                 message = data.decode()
                 idx = message.find("{")
                 message = message[idx:]
-                print(message)
                 self.to_server_queue.append(message)
                 self.server_event.set()
             except Exception as e:
