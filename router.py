@@ -1,5 +1,6 @@
 import json
 import asyncio
+from datetime import datetime
 
 import websockets
 from collections import deque
@@ -73,28 +74,26 @@ class Router:
                 message = self.devices_message[mac].popleft()
                 writer.write(message.encode())
                 await writer.drain()
-                # print(f"Wysłano do {mac}: {message}")
+                print(f"Wysłano do {mac}: {message}")
             await asyncio.sleep(0.1)
 
     async def receive_from_device(self, mac: str, reader: asyncio.StreamReader,writer: asyncio.StreamWriter):
         while self.devices_connection[mac]:
             try:
-                data = await asyncio.wait_for(reader.read(1024), timeout=10.0)
+                data = await asyncio.wait_for(reader.read(1024), timeout=90.0)
                 if not data:
-                    print("Brak danych")
+                    print(f"Brak danych od {mac}, rozłączam")
                     self.devices_connection[mac] = False
                     return
-                if data == b"P":
-                    writer.write(b"P")
-                    await writer.drain()
-                    continue
                 message = data.decode()
-                idx = message.find("{")
-                message = message[idx:]
                 self.to_server_queue.append(message)
                 self.server_event.set()
+            except asyncio.TimeoutError:
+                print(f"Timeout od {mac}, kontynuuję...")
+                self.devices_connection[mac] = False
+                continue
             except Exception as e:
-                print(e)
+                print(f"Błąd od {mac}: {e}")
                 self.devices_connection[mac] = False
                 return
 
@@ -122,7 +121,7 @@ class Router:
             initial_data = json.dumps(data)
         except UnicodeDecodeError:
             return
-        print(f"Podłączono urządzenie: {mac}")
+        print(f"Podłączono urządzenie: {mac}",datetime.now())
 
         self.devices_message[mac] = deque()
         self.devices_event[mac] = asyncio.Event()
@@ -138,13 +137,13 @@ class Router:
         except asyncio.CancelledError:
             print(f"Urządzenie {mac} rozłączone")
         finally:
-            print(f"brak komunikacji z {mac}")
-            if mac in self.devices_message:
-                del self.devices_message[mac]
-            if mac in self.devices_event:
-                del self.devices_event[mac]
-            if mac in self.devices_connection:
-                del self.devices_connection[mac]
+            print(f"brak komunikacji z {mac}", datetime.now())
+            # if mac in self.devices_message:
+            #     del self.devices_message[mac]
+            # if mac in self.devices_event:
+            #     del self.devices_event[mac]
+            # if mac in self.devices_connection:
+            #     del self.devices_connection[mac]
             self.to_server_queue.append(device_disconnect_request(mac).to_json())
             self.server_event.set()
             try:
