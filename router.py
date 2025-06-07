@@ -1,7 +1,6 @@
 import json
 import asyncio
-from datetime import datetime
-
+from uuid import uuid4, UUID
 import websockets
 from collections import deque
 
@@ -14,11 +13,10 @@ from communication_protocol.message import (
 
 def log(level: str, message: str) -> None:
     print(f"[{level}] {message}")
+
 class Router:
     def __init__(self):
-        self.devices_message = {}  # mac:deque()
-        self.devices_event = {}
-        self.devices_connection = {}
+        self.connection_devices = {}
         self.server_event = asyncio.Event()
         self.to_server_queue = deque()
         # self.uri = "wss://dashing-cod-pretty.ngrok-free.app/ws/router/1234/"
@@ -30,10 +28,9 @@ class Router:
             message_json = json.loads(message)
             mac = message_json["device_id"]
             try:
-                if mac in self.devices_message:
-                    self.devices_message[mac].append(message)
-                    self.devices_event[mac].set()
-                    log("INFO", f"Odebrano wiadomość dla {mac}: {message_json}")
+                if mac in self.connection_devices:
+                    self.connection_devices[mac]["queue"].append(message)
+                    # log("INFO", f"Odebrano wiadomość dla {mac}: {message_json}")
                 else:
                     log("WARNING", f"Nieznane urządzenie: {mac}")
             except KeyError as e:
@@ -47,7 +44,7 @@ class Router:
                 continue
             message = self.to_server_queue.popleft()
             await websocket.send(message)
-            log("INFO", f"Wysłano do serwera: {message}")
+            # log("INFO", f"Wysłano do serwera: {message}")
             # print(f"Wysłano do serwera: {message}")
 
     async def connect_to_server(self):
@@ -73,38 +70,27 @@ class Router:
                 await asyncio.sleep(5)
                 continue
 
-    async def send_to_device(self, mac: str, writer: asyncio.StreamWriter):
-        while self.devices_connection[mac]:
-            if self.devices_message[mac]:
-                message = self.devices_message[mac].popleft()
+    async def send_to_device(self, mac: str, token: UUID, writer: asyncio.StreamWriter):
+        while self.connection_devices[mac].get("token",None) == token:
+            if self.connection_devices[mac]["queue"]:
+                message = self.connection_devices[mac]["queue"].popleft()
                 writer.write(message.encode())
                 await writer.drain()
-                log("INFO", f"Wysłano do {mac}: {message}")
+                # log("INFO", f"Wysłano do {mac}: {message}")
             await asyncio.sleep(0.1)
 
-    async def receive_from_device(self, mac: str, reader: asyncio.StreamReader,writer: asyncio.StreamWriter):
-        while self.devices_connection[mac]:
-            try:
-                data = await asyncio.wait_for(reader.read(1024), timeout=90.0)
-                if not data:
-                    log("ERROR", f"Brak danych od {mac}, rozłączam")
-                    self.devices_connection[mac] = False
-                    return
-                if not data.strip():
-                    print(data.strip())
-                    continue
-                message = data.decode()
-                self.to_server_queue.append(message)
-                self.server_event.set()
-                log("INFO", f"Odebrano od {mac}: {message}")
-            except asyncio.TimeoutError:
-                log("INFO", f"Timeout od {mac}, kontynuuję...")
-                self.devices_connection[mac] = False
+    async def receive_from_device(self, mac: str,token:UUID, reader: asyncio.StreamReader):
+        while self.connection_devices[mac].get("token",None) == token:
+            data = await asyncio.wait_for(reader.read(1024), timeout=10.0)
+            if not data:
+                log("ERROR", f"Brak danych od {mac}, rozłączam")
+                raise ConnectionResetError()
+            if not data.strip():
                 continue
-            except Exception as e:
-                log("ERROR", f"Błąd od {mac}: {e}")
-                self.devices_connection[mac] = False
-                return
+            message = data.decode()
+            self.to_server_queue.append(message)
+            self.server_event.set()
+
 
     async def handle_device(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -130,39 +116,35 @@ class Router:
             data["payload"]["ip"] = ip
             data["payload"]["port"] = port
             initial_data = json.dumps(data)
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as e:
             log("ERROR", f"Błąd dekodowania danych początkowych: {e}")
             return
-        log("INFO", f"Podłączono urządzenie: {mac}")
 
-        self.devices_message[mac] = deque()
-        self.devices_event[mac] = asyncio.Event()
-        self.devices_connection[mac] = True
+        connection_token = uuid4()
+        log("INFO", f"Podłączono urządzenie: {mac,connection_token}")
+        self.connection_devices[mac] = {
+            "token": connection_token,
+            "queue": deque(),
+        }
         self.to_server_queue.append(initial_data)
         self.server_event.set()
-        send_task = asyncio.create_task(self.send_to_device(mac, writer))
-        receive_task = asyncio.create_task(self.receive_from_device(mac, reader,writer))
+        send_task = asyncio.create_task(self.send_to_device(mac,connection_token, writer))
+        receive_task = asyncio.create_task(self.receive_from_device(mac, connection_token, reader))
         try:
-            await asyncio.gather(send_task, receive_task, return_exceptions=True)
+            await asyncio.gather(send_task, receive_task)
+        except asyncio.TimeoutError:
+            log("WARNING", f"Timeout połączenia z urządzeniem {mac, connection_token}")
+        except ConnectionResetError:
+            log("ERROR", f"Połączenie z urządzeniem {mac, connection_token} zostało zresetowane")
         except Exception as e:
-            log("ERROR", f"Błąd w obsłudze urządzenia {mac}: {e}")
-        except asyncio.CancelledError:
-            print(f"Urządzenie {mac} rozłączone")
+            log("ERROR", f"Błąd w obsłudze urządzenia {mac, connection_token}: {e}")
         finally:
-            log("INFO", f"Rozłączono urządzenie {mac}")
-            # if mac in self.devices_message:
-            #     del self.devices_message[mac]
-            # if mac in self.devices_event:
-            #     del self.devices_event[mac]
-            # if mac in self.devices_connection:
-            #     del self.devices_connection[mac]
-            self.to_server_queue.append(device_disconnect_request(mac).to_json())
-            self.server_event.set()
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception as e:
-                log("ERROR", f"Błąd zamykania połączenia {mac}: {e}")
+            log("INFO", f"Rozłączono urządzenie {mac, connection_token}")
+            if mac in self.connection_devices:
+                if self.connection_devices[mac]["token"] == connection_token:
+                    del self.connection_devices[mac]
+                    self.to_server_queue.append(device_disconnect_request(mac).to_json())
+                    self.server_event.set()
 
     async def device_server(self):
         server = await asyncio.start_server(self.handle_device, "0.0.0.0", 8080)
