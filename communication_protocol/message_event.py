@@ -21,3 +21,8 @@ class MessageEvent(Enum):
     SET_RGB = "set_rgb"
     SET_FLUO = "set_fluo"
     SET_LED = "set_led"
+    CAMERA_OFFER = "camera_offer"
+    CAMERA_ANSWER = "camera_answer"
+    CAMERA_ICE = "camera_ice"
+    CAMERA_DISCONNECT = "device_disconnect"
+    CAMERA_ERROR = "camera_error"
