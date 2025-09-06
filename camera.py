@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 from collections import deque
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, RTCIceCandidate
@@ -9,6 +10,7 @@ from communication_protocol.communication_protocol import DeviceMessage
 from communication_protocol.message_event import MessageEvent
 from communication_protocol.message_type import MessageType
 from aiortc.sdp import SessionDescription
+import av.error
 
 class Camera:
     def __init__(self,token:str, server_event, to_server_queue):
@@ -47,18 +49,18 @@ class Camera:
         sdp = payload.get("offer", {}).get("sdp")
         offer_type = payload.get("offer", {}).get("type")
 
-        offer = RTCSessionDescription(sdp=sdp, type=offer_type)
-        await self.pc.setRemoteDescription(offer)
-
-        if not self.player:
-            try:
-              self.add_player(rtsp)
-            except Exception as e:
-                self.get_wrong_rtsp_message(message_id)
-                self.send_to_server(self.get_wrong_rtsp_message(message_id))
-                await self.stop()
-                return
-
+        try:
+            offer = RTCSessionDescription(sdp=sdp, type=offer_type)
+            await self.pc.setRemoteDescription(offer)
+            if not self.player:
+                  self.add_player(rtsp)
+        except Exception as e:
+            print(e)
+            print(e.args)
+            error_message = self._get_error_message(e.args[0] if e.args else 0)
+            self.send_to_server(self.get_camera_error_message(message_id,error_message))
+            await self.stop()
+            return
         answer = await self.pc.createAnswer()
         await self.pc.setLocalDescription(answer)
         response = self.get_answer_message(message_id)
@@ -118,14 +120,26 @@ class Camera:
         self.to_server_queue.append(message.to_json())
         self.server_event.set()
 
-    def get_wrong_rtsp_message(self, message_id:str) -> DeviceMessage:
+    def get_camera_error_message(self, message_id:str, error:str) -> DeviceMessage:
         return DeviceMessage(
             message_type=MessageType.RESPONSE,
             message_event=MessageEvent.CAMERA_ERROR,
             device_id="camera",
             payload={
                 "token": self.token,
-                "error": "Wrong RTSP URL",
+                "error": error,
             },
             message_id=message_id,
         )
+
+    def _get_error_message(self,errno:int) -> str:
+        error_messages = {
+            1: "Operation not permitted",
+            2: "No such file or directory",
+            5: "Input/output error",
+            11: "Resource temporarily unavailable",
+            22: "Invalid argument",
+            110: "Connection timed out",
+            1414092869: "Could not connect to camera",
+        }
+        return error_messages.get(errno, "Unknown error")

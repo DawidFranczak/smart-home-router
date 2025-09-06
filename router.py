@@ -59,7 +59,6 @@ class Router:
                 if not camera:
                     continue
                 camera.message(message_json)
-                print(self.cameras)
             except KeyError as e:
                 log("ERROR", f"KeyError: {e}, devices_message: {self.devices_message}")
 
