@@ -1,6 +1,5 @@
 import json
 import asyncio
-from os import access
 from uuid import uuid4, UUID
 import websockets
 from collections import deque
@@ -51,11 +50,8 @@ class Router:
                     continue
                 if message_event == MessageEvent.CAMERA_OFFER.value:
                     if not camera_name in self.cameras:
-                        camera = Camera(token,self.server_event,self.to_server_queue)
+                        camera = Camera(token,self.server_event,self.to_server_queue, self.close_camera_connections)
                         self.cameras[camera_name] = camera
-                elif message_event == MessageEvent.CAMERA_DISCONNECT.value:
-                    if camera_name in self.cameras:
-                        del self.cameras[camera_name]
                 if not camera:
                     continue
                 camera.message(message_json)
@@ -190,6 +186,10 @@ class Router:
         async with server:
             await server.serve_forever()
 
+    def close_camera_connections(self, token:str):
+        name = f"camera_{token}"
+        if name in self.cameras:
+            del self.cameras[name]
 
 async def main(router: Router):
     await asyncio.gather(router.connect_to_server(), router.device_server())

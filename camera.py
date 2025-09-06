@@ -1,19 +1,14 @@
 import asyncio
-import json
-import os
 import uuid
 from collections import deque
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer, RTCIceCandidate
 from aiortc.contrib.media import MediaPlayer
-
 from communication_protocol.communication_protocol import DeviceMessage
 from communication_protocol.message_event import MessageEvent
 from communication_protocol.message_type import MessageType
-from aiortc.sdp import SessionDescription
-import av.error
 
 class Camera:
-    def __init__(self,token:str, server_event, to_server_queue):
+    def __init__(self,token:str, server_event, to_server_queue,close_camera_connections):
         self.pc = RTCPeerConnection(
             RTCConfiguration(
                 iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]
@@ -23,6 +18,7 @@ class Camera:
         self.server_event:asyncio.Event = server_event
         self.to_server_queue:deque = to_server_queue
         self.token = token
+        self.close_camera_connections = close_camera_connections
 
         @self.pc.on("icecandidate")
         def on_icecandidate(event):
@@ -44,27 +40,30 @@ class Camera:
                 self.to_server_queue.append(response.to_json())
                 self.server_event.set()
 
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            if self.pc.connectionState in ["failed", "disconnected", "closed"]:
+                await self.stop()
+                self.close_camera_connections(self.token)
+
     async def handle_offer(self, payload:dict, message_id:str):
         rtsp = payload.get("rtsp")
         sdp = payload.get("offer", {}).get("sdp")
         offer_type = payload.get("offer", {}).get("type")
-
         try:
             offer = RTCSessionDescription(sdp=sdp, type=offer_type)
             await self.pc.setRemoteDescription(offer)
             if not self.player:
                   self.add_player(rtsp)
+            answer = await self.pc.createAnswer()
+            await self.pc.setLocalDescription(answer)
+            response = self.get_answer_message(message_id)
+            self.send_to_server(response)
         except Exception as e:
-            print(e)
-            print(e.args)
             error_message = self._get_error_message(e.args[0] if e.args else 0)
             self.send_to_server(self.get_camera_error_message(message_id,error_message))
             await self.stop()
             return
-        answer = await self.pc.createAnswer()
-        await self.pc.setLocalDescription(answer)
-        response = self.get_answer_message(message_id)
-        self.send_to_server(response)
 
     # async def handle_candidate(self, candidate: dict):
     #     ice_candidate = RTCIceCandidate(
@@ -80,6 +79,8 @@ class Camera:
         if message["message_event"] == MessageEvent.CAMERA_OFFER.value:
             try:
                 payload = message["payload"]
+                if self.pc.connectionState in ["closed", "failed", "disconnected"]:
+                    return
                 asyncio.create_task(
                     self.handle_offer(payload, message["message_id"])
                 )
@@ -109,6 +110,7 @@ class Camera:
             },
             message_id=message_id,
         )
+
     def add_player(self, rtsp:str):
         self.player = MediaPlayer(rtsp, timeout=10)
         if self.player.video:
