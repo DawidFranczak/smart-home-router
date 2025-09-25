@@ -10,7 +10,7 @@ from aiortc import (
     RTCIceServer,
     RTCIceCandidate,
 )
-from aiortc.contrib.media import MediaPlayer
+from aiortc.contrib.media import MediaPlayer, MediaRelay
 from communication_protocol.communication_protocol import Message
 from communication_protocol.message_event import MessageEvent
 from communication_protocol.message_type import MessageType
@@ -46,7 +46,6 @@ class Camera:
                     message_id=uuid.uuid4().hex,
                 )
                 self.to_server_queue.append(response.to_json())
-                self.server_event.set()
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
@@ -62,7 +61,7 @@ class Camera:
             offer = RTCSessionDescription(sdp=sdp, type=offer_type)
             await self.pc.setRemoteDescription(offer)
             if not self.player:
-                self.add_player(rtsp)
+                await self.add_player(rtsp)
             answer = await self.pc.createAnswer()
             await self.pc.setLocalDescription(answer)
             response = self.get_answer_message(message_id)
@@ -84,7 +83,6 @@ class Camera:
 
     def message(self, message: Message):
         # print(f"Odebrano wiadomość dla kamery: {message}")
-
         if message.message_event == MessageEvent.CAMERA_OFFER.value:
             try:
                 payload = message.payload
@@ -118,8 +116,11 @@ class Camera:
             message_id=message_id,
         )
 
-    def add_player(self, rtsp: str):
+    async def add_player(self, rtsp: str):
+        print("start", rtsp)
         self.player = MediaPlayer(rtsp, timeout=10)
+        print("stop", rtsp)
+
         if self.player.video:
             self.pc.addTrack(self.player.video)
         if self.player.audio:
