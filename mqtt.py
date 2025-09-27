@@ -5,6 +5,7 @@ from typing import Deque
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import PacketTypes, Properties
 from communication_protocol.communication_protocol import Message
+from communication_protocol.message_event import MessageEvent
 
 
 class Mqtt:
@@ -51,6 +52,9 @@ class Mqtt:
     def send_to_device(self, message: Message):
         if not self.client.is_connected():
             self.message_queue.append(message)
+            return
+        if message.message_event == MessageEvent.GET_CONNECTED_DEVICES.value:
+            self.client.publish(f"device/broadcast/", message.model_dump_json(), qos=1)
             return
         self.client.publish(
             f"device/{message.device_id}/", message.model_dump_json(), qos=1

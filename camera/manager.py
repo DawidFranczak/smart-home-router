@@ -71,8 +71,6 @@ class CameraManager:
             message = await session.handle_offer(offer, tracks, message.message_id)
             self.send_to_server(message)
             connection.sessions.add(token)
-            print(len(self.sessions), "active sessions")
-            print(len(self.connection), "active connections")
 
     async def _get_or_create_camera_connection(self, rtsp: str) -> CameraConnection:
         """

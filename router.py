@@ -110,7 +110,13 @@ class Router:
         while True:
             while len(self.message_queue) > 0:
                 queued_message = self.message_queue.popleft()
+                print(
+                    queued_message.message_type,
+                    queued_message.message_event,
+                    queued_message.payload,
+                )
                 await websocket.send(queued_message.model_dump_json())
+                await asyncio.sleep(0.02)
             await asyncio.sleep(0.1)
 
     def send_to_server(self, message: Message):

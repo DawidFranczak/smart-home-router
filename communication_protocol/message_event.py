@@ -2,6 +2,7 @@ from enum import Enum
 
 
 class MessageEvent(str, Enum):
+    GET_CONNECTED_DEVICES = "get_connected_devices"
     DEVICE_CONNECT = "device_connect"
     DEVICE_DISCONNECT = "device_disconnect"
     HEALTH_CHECK = "health_check"
