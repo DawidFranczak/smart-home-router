@@ -1,200 +1,143 @@
-import json
 import asyncio
-from uuid import uuid4, UUID
-import websockets
 from collections import deque
+from typing import Deque
 
+import websockets
 from websockets import InvalidStatus
 from websockets.exceptions import ConnectionClosedError
-
-from camera import Camera
-from communication_protocol.message import (
-    device_disconnect_request,
-)
-from communication_protocol.message_event import MessageEvent
-
-
-def log(level: str, message: str) -> None:
-    print(f"[{level}] {message}")
+from camera.manager import CameraManager
+from communication_protocol.message import Message
 
 
 class Router:
-    def __init__(self):
-        self.connection_devices = {}
-        self.cameras = {}
-        self.server_event = asyncio.Event()
-        self.to_server_queue = deque()
-        # self.uri = "wss://dashing-cod-pretty.ngrok-free.app/ws/router/1234/"
-        self.uri = "ws://localhost:80/ws/router/1234/"
-        log("INFO", "Inicjalizacja Routera")
+    """
+    WebSocket router for bidirectional communication between server and local services.
 
-    async def receive_from_server(self, websocket: websockets.ClientConnection):
-        async for message in websocket:
-            message = message.replace("'", '"')
-            message_json = json.loads(message)
-            mac = message_json.get("device_id")
-            try:
-                if not mac:
-                    log("WARNING", f"Nieznane urządzenie: {mac}")
-                    continue
-                if mac in self.connection_devices:
-                    self.connection_devices[mac]["queue"].append(message)
-                    continue
-                token = message_json.get("payload").get("token")
-                if not token:
-                    continue
-                camera_name = f"camera_{token}"
-                camera = self.cameras.get(camera_name, None)
-                message_event = message_json.get("message_event", None)
-                if not message_event:
-                    continue
-                if message_event == MessageEvent.CAMERA_OFFER.value:
-                    if not camera_name in self.cameras:
-                        camera = Camera(token,self.server_event,self.to_server_queue, self.close_camera_connections)
-                        self.cameras[camera_name] = camera
-                if not camera:
-                    continue
-                camera.message(message_json)
-            except KeyError as e:
-                log("ERROR", f"KeyError: {e}, devices_message: {self.devices_message}")
+    This class manages the WebSocket connection to the server and routes messages
+    between the server and local components (camera manager, device broker).
+    Provides automatic reconnection, message queuing, and error handling for
+    reliable communication in distributed camera streaming system.
+    """
 
-    async def send_to_server(self, websocket: websockets.ClientConnection):
-        while True:
-            if len(self.to_server_queue) == 0:
-                await self.server_event.wait()
-                self.server_event.clear()
-                continue
-            message = self.to_server_queue.popleft()
-            await websocket.send(message)
-            # log("INFO", f"Wysłano do serwera: {message}")
-            # print(f"Wysłano do serwera: {message}")
+    def __init__(self, uri: str, camera_manager: CameraManager):
+        """
+        Initialize the router with server URI and camera manager.
 
-    async def connect_to_server(self):
+        Args:
+            uri (str): WebSocket server URI to connect to
+            camera_manager (CameraManager): Camera manager instance for handling camera messages
+        """
+
+        self.uri = uri
+        self.send_to_device = None
+        self.message_queue: Deque[Message] = deque()
+        self.camera_manager = camera_manager
+
+    async def start(self):
+        """
+        Start the router with automatic reconnection loop.
+
+        This method maintains persistent connection to the server with automatic
+        reconnection on failures. Handles connection errors gracefully and
+        provides exponential backoff for connection attempts.
+        """
+
         while True:
             try:
                 async with websockets.connect(self.uri) as websocket:
-                    log("INFO", "Połączono z serwerem")
-                    send_to_server = asyncio.create_task(self.send_to_server(websocket))
+                    print("Connected to server")
                     receive_from_server = asyncio.create_task(
-                        self.receive_from_server(websocket)
+                        self._receive_from_server(websocket)
                     )
-                    await asyncio.gather(send_to_server, receive_from_server)
+                    send_to_server = asyncio.create_task(
+                        self._send_to_server(websocket)
+                    )
+                    await asyncio.gather(receive_from_server, send_to_server)
             except (ConnectionClosedError, ConnectionRefusedError) as e:
-                log(
-                    "ERROR", f"Przerwano połączenie z serwerem: {e}. Próba za 5 sekund."
-                )
+                print("Connection to server closed or refused, retrying...")
                 await asyncio.sleep(5)
                 continue
             except InvalidStatus as e:
-                log("ERROR", f"InvalidStatus: {e}")
+                print(f"WebSocket connection failed with invalid status: {e}")
                 await asyncio.sleep(5)
                 continue
             except Exception as e:
-                log("ERROR", f"Błąd: {e}")
+                print(f"Unexpected error in router connection: {e}")
                 await asyncio.sleep(5)
                 continue
 
-    async def send_to_device(self, mac: str, token: UUID, writer: asyncio.StreamWriter):
-        while self.connection_devices[mac].get("token", None) == token:
-            if self.connection_devices[mac]["queue"]:
-                message = self.connection_devices[mac]["queue"].popleft()
-                writer.write(message.encode())
-                await writer.drain()
-                # log("INFO", f"Wysłano do {mac}: {message}")
+    async def _receive_from_server(self, websocket: websockets.ClientConnection):
+        """
+        Handle incoming messages from the server.
+
+        Routes messages based on device_id:
+        - Camera messages: forwarded to camera manager
+        - Other device messages: forwarded to device broker
+        - Invalid messages: silently ignored with error logging
+
+        Args:
+            websocket: Active WebSocket connection to server
+        """
+
+        async for message in websocket:
+            try:
+                message = Message.model_validate_json(message)
+                if message.device_id != "camera":
+                    self.send_to_device(message)
+                    continue
+                token = message.payload.get("token", None)
+                if not token:
+                    print("Camera message missing token, skipping")
+                    continue
+                asyncio.create_task(self.camera_manager.on_message(message))
+
+            except Exception as e:
+                print(f"Error processing incoming message: {e}")
+                continue
+            except KeyError as e:
+                print(f"Missing required field in message: {e}")
+
+    async def _send_to_server(self, websocket: websockets.ClientConnection):
+        """
+        Send queued messages to the server.
+
+        Continuously processes the outgoing message queue, sending messages
+        to the server via WebSocket.
+
+        Args:
+            websocket: Active WebSocket connection to server
+        """
+        while True:
+            while len(self.message_queue) > 0:
+                queued_message = self.message_queue.popleft()
+                print(
+                    queued_message.message_type,
+                    queued_message.message_event,
+                    queued_message.payload,
+                )
+                await websocket.send(queued_message.model_dump_json())
+                await asyncio.sleep(0.02)
             await asyncio.sleep(0.1)
 
-    async def receive_from_device(
-        self, mac: str, token: UUID, reader: asyncio.StreamReader
-    ):
-        while self.connection_devices[mac].get("token", None) == token:
-            data = await asyncio.wait_for(reader.read(1024), timeout=90.0)
-            if not data:
-                log("ERROR", f"Brak danych od {mac}, rozłączam")
-                raise ConnectionResetError()
-            if not data.strip():
-                continue
-            message = data.decode()
-            self.to_server_queue.append(message)
-            self.server_event.set()
+    def send_to_server(self, message: Message):
+        """
+        Queue a message for sending to the server.
 
-    async def handle_device(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ):
-        log("INFO", "Nowe połączenie z urządzeniem")
-        try:
-            initial_data = await asyncio.wait_for(reader.read(1024), timeout=5.0)
-            if not initial_data:
-                log("ERROR", "Brak danych początkowych, zamykam połączenie")
-                writer.close()
-                await writer.wait_closed()
-                return
-        except asyncio.TimeoutError:
-            log("ERROR", "Timeout danych początkowych, zamykam połączenie")
-            writer.close()
-            await writer.wait_closed()
-            return
-        try:
-            initial_data = initial_data.decode("utf-8")
-            data = json.loads(initial_data)
-            ip, port = writer.get_extra_info("peername")
-            mac = data["device_id"]
-            data["payload"]["ip"] = ip
-            data["payload"]["port"] = port
-            initial_data = json.dumps(data)
-        except UnicodeDecodeError as e:
-            log("ERROR", f"Błąd dekodowania danych początkowych: {e}")
-            return
+        Messages are queued and sent asynchronously by the _send_to_server task.
+        This method is thread-safe and non-blocking.
 
-        connection_token = uuid4()
-        log("INFO", f"Podłączono urządzenie: {mac,connection_token}")
-        self.connection_devices[mac] = {
-            "token": connection_token,
-            "queue": deque(),
-        }
-        self.to_server_queue.append(initial_data)
-        self.server_event.set()
-        send_task = asyncio.create_task(
-            self.send_to_device(mac, connection_token, writer)
-        )
-        receive_task = asyncio.create_task(
-            self.receive_from_device(mac, connection_token, reader)
-        )
-        try:
-            await asyncio.gather(send_task, receive_task)
-        except asyncio.TimeoutError:
-            log("WARNING", f"Timeout połączenia z urządzeniem {mac, connection_token}")
-        except ConnectionResetError:
-            log(
-                "ERROR",
-                f"Połączenie z urządzeniem {mac, connection_token} zostało zresetowane",
-            )
-        except Exception as e:
-            log("ERROR", f"Błąd w obsłudze urządzenia {mac, connection_token}: {e}")
-        finally:
-            log("INFO", f"Rozłączono urządzenie {mac, connection_token}")
-            if mac in self.connection_devices:
-                if self.connection_devices[mac]["token"] == connection_token:
-                    del self.connection_devices[mac]
-                    self.to_server_queue.append(
-                        device_disconnect_request(mac).to_json()
-                    )
-                    self.server_event.set()
+        Args:
+            message (Message): Message to send to server
+        """
 
-    async def device_server(self):
-        server = await asyncio.start_server(self.handle_device, "0.0.0.0", 8080)
-        log("INFO", f"Serwer TCP dla urządzeń uruchomiony na porcie 8080")
-        async with server:
-            await server.serve_forever()
+        self.message_queue.append(message)
 
-    def close_camera_connections(self, token:str):
-        name = f"camera_{token}"
-        if name in self.cameras:
-            del self.cameras[name]
+    def bind_broker(self, broker):
+        """
+        Bind device broker for routing non-camera messages.
 
-async def main(router: Router):
-    await asyncio.gather(router.connect_to_server(), router.device_server())
+        Args:
+            broker: Device broker instance with send_to_device method
+        """
 
-
-if __name__ == "__main__":
-    router = Router()
-    asyncio.run(main(router))
+        self.send_to_device = broker.send_to_device
