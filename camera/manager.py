@@ -52,7 +52,7 @@ class CameraManager:
         Args:
             message (Message): Incoming message containing camera offer
         """
-
+        print(message.message_event, message.message_type)
         token = message.payload["token"]
         if message.message_event == MessageEvent.CAMERA_OFFER.value:
             rtsp = message.payload["rtsp"]
