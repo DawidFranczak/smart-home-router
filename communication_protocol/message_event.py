@@ -40,3 +40,11 @@ class MessageEvent(str, Enum):
 
     # Measurement events
     ON_MEASUREMENT_TEMP_HUM = "on_measurement_temp_hum"
+
+    # Temperature events
+    ON_TEMPERATURE_ABOVE = "on_temperature_above"
+    ON_TEMPERATURE_BELOW = "on_temperature_below"
+
+    # Humidity events
+    ON_HUMIDITY_ABOVE = "on_humidity_above"
+    ON_HUMIDITY_BELOW = "on_humidity_below"
