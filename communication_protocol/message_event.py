@@ -13,6 +13,7 @@ class MessageEvent(str, Enum):
     # Button events
     ON_CLICK = "on_click"
     ON_HOLD = "on_hold"
+    ON_TOGGLE = "on_toggle"
 
     # Light events
     ON = "on"
