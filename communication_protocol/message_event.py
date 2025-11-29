@@ -9,6 +9,7 @@ class MessageEvent(str, Enum):
     HEALTH_CHECK = "health_check"
     SET_SETTINGS = "set_settings"
     GET_SETTINGS = "get_settings"
+    STATE_CHANGE = "state_change"
 
     # Button events
     ON_CLICK = "on_click"
