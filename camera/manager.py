@@ -52,7 +52,6 @@ class CameraManager:
         Args:
             message (Message): Incoming message containing camera offer
         """
-        print(message.message_event, message.message_type)
         token = message.payload["token"]
         if message.message_event == MessageEvent.CAMERA_OFFER.value:
             rtsp = message.payload["rtsp"]
@@ -69,6 +68,7 @@ class CameraManager:
                 await self.delete_session(token, rtsp)
                 return
             message = await session.handle_offer(offer, tracks, message.message_id)
+            print(message)
             self.send_to_server(message)
             connection.sessions.add(token)
 

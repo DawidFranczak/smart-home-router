@@ -66,6 +66,7 @@ class CameraConnection:
                 )
                 self._opened.set()
             except Exception as e:
+                print(e)
                 if self.player:
                     self.player = None
             finally:
