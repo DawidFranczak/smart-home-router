@@ -50,6 +50,7 @@ class Mqtt:
             print("Error processing message:", e)
 
     def send_to_device(self, message: Message):
+
         if not self.client.is_connected():
             self.message_queue.append(message)
             return

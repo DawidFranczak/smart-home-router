@@ -7,6 +7,8 @@ from websockets import InvalidStatus
 from websockets.exceptions import ConnectionClosedError
 from camera.manager import CameraManager
 from communication_protocol.message import Message
+from communication_protocol.message_event import MessageEvent
+from webapp.webapp import Webapp
 
 
 class Router:
@@ -19,7 +21,7 @@ class Router:
     reliable communication in distributed camera streaming system.
     """
 
-    def __init__(self, uri: str, camera_manager: CameraManager):
+    def __init__(self, uri: str, camera_manager: CameraManager, webapp: Webapp):
         """
         Initialize the router with server URI and camera manager.
 
@@ -32,6 +34,7 @@ class Router:
         self.send_to_device = None
         self.message_queue: Deque[Message] = deque()
         self.camera_manager = camera_manager
+        self.webapp = webapp
 
     async def start(self):
         """
@@ -82,6 +85,9 @@ class Router:
         async for message in websocket:
             try:
                 message = Message.model_validate_json(message)
+                if message.message_event == MessageEvent.UPDATE_FIRMWARE:
+                    asyncio.create_task(self.webapp.download_if_needed(message))
+                    continue
                 if message.device_id != "camera":
                     self.send_to_device(message)
                     continue
