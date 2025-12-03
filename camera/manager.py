@@ -68,7 +68,6 @@ class CameraManager:
                 await self.delete_session(token, rtsp)
                 return
             message = await session.handle_offer(offer, tracks, message.message_id)
-            print(message)
             self.send_to_server(message)
             connection.sessions.add(token)
 
