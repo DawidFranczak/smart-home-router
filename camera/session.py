@@ -37,7 +37,19 @@ class CameraSession:
 
         self.pc = RTCPeerConnection(
             RTCConfiguration(
-                iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]
+                iceServers=[
+                    RTCIceServer(urls="stun:stun.l.google.com:19302"),
+                    RTCIceServer(
+                        urls="turn:relay1.expressturn.com:3480?transport=udp",
+                        username="000000002079983019",
+                        credential="Xrhc7a43tR34qR5YaC8iPwx1R1o=",
+                    ),
+                    RTCIceServer(
+                        urls="turn:relay1.expressturn.com:3480?transport=tcp",
+                        username="000000002079983019",
+                        credential="Xrhc7a43tR34qR5YaC8iPwx1R1o=",
+                    ),
+                ]
             )
         )
         self.rtsp = rtsp
