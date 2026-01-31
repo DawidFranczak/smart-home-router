@@ -87,15 +87,10 @@ class Router:
                 message = Message.model_validate_json(message)
                 if message.message_event == MessageEvent.UPDATE_FIRMWARE:
                     asyncio.create_task(self.webapp.download_if_needed(message))
-                    continue
-                if message.device_id != "camera":
+                elif message.device_id == "camera":
+                    asyncio.create_task(self.camera_manager.on_message(message))
+                else:
                     self.send_to_device(message)
-                    continue
-                token = message.payload.get("token", None)
-                if not token:
-                    print("Camera message missing token, skipping")
-                    continue
-                asyncio.create_task(self.camera_manager.on_message(message))
 
             except Exception as e:
                 print(f"Error processing incoming message: {e}")
@@ -118,7 +113,7 @@ class Router:
                 queued_message = self.message_queue.popleft()
                 print(queued_message)
                 await websocket.send(queued_message.model_dump_json())
-                await asyncio.sleep(0.02)
+                await asyncio.sleep(0.001)
             await asyncio.sleep(0.1)
 
     def send_to_server(self, message: Message):
