@@ -1,5 +1,6 @@
 .venv
 .idea
 .gitignore
+logs
 Dockerfile
 README.md

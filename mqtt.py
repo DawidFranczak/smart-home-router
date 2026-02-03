@@ -1,3 +1,4 @@
+import logging
 import time
 from collections import deque
 from typing import Deque
@@ -7,6 +8,7 @@ from paho.mqtt.properties import PacketTypes, Properties
 from communication_protocol.communication_protocol import Message
 from communication_protocol.message_event import MessageEvent
 
+logger = logging.getLogger(__name__)
 
 class Mqtt:
     def __init__(self, ip: str, port: int, keepalive: int = 60):
@@ -30,7 +32,7 @@ class Mqtt:
 
     def on_connect(self, client, userdata, flags, reasonCode, properties):
         self.client.subscribe("hub", qos=1)
-        print("Connected to MQTT broker")
+        logger.info("Connected to MQTT broker")
         while len(self.message_queue) > 0:
             self.send_to_server(self.message_queue.popleft())
 
@@ -47,7 +49,7 @@ class Mqtt:
         try:
             self.send_to_server(Message.model_validate_json(message.payload.decode()))
         except Exception as e:
-            print("Error processing message:", e)
+            logger.error("Error processing message:", e)
 
     def send_to_device(self, message: Message):
 
@@ -76,4 +78,4 @@ class Mqtt:
                 self.ip, self.port, self.keepalive, clean_start=False, properties=props
             )
         except ConnectionRefusedError:
-            print("Connection refused. Retrying in 5 seconds...")
+            logger.warning("Connection refused. Retrying in 5 seconds...")
