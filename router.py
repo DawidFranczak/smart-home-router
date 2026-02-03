@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import deque
 from typing import Deque
 
@@ -9,7 +10,7 @@ from camera.manager import CameraManager
 from communication_protocol.message import Message
 from communication_protocol.message_event import MessageEvent
 from webapp.webapp import Webapp
-
+logger = logging.getLogger(__name__)
 
 class Router:
     """
@@ -48,7 +49,7 @@ class Router:
         while True:
             try:
                 async with websockets.connect(self.uri) as websocket:
-                    print("Connected to server")
+                    logger.info("Connected to server")
                     receive_from_server = asyncio.create_task(
                         self._receive_from_server(websocket)
                     )
@@ -57,15 +58,15 @@ class Router:
                     )
                     await asyncio.gather(receive_from_server, send_to_server)
             except (ConnectionClosedError, ConnectionRefusedError) as e:
-                print("Connection to server closed or refused, retrying...")
+                logger.warning("Connection to server closed or refused, retrying...")
                 await asyncio.sleep(5)
                 continue
             except InvalidStatus as e:
-                print(f"WebSocket connection failed with invalid status: {e}")
+                logger.warning(f"WebSocket connection failed with invalid status: {e}")
                 await asyncio.sleep(5)
                 continue
             except Exception as e:
-                print(f"Unexpected error in router connection: {e}")
+                logger.warning(f"Unexpected error in router connection: {e}")
                 await asyncio.sleep(5)
                 continue
 
@@ -93,10 +94,10 @@ class Router:
                     self.send_to_device(message)
 
             except Exception as e:
-                print(f"Error processing incoming message: {e}")
+                logger.error(f"Error processing incoming message: {e}")
                 continue
             except KeyError as e:
-                print(f"Missing required field in message: {e}")
+                logger.error(f"Missing required field in message: {e}")
 
     async def _send_to_server(self, websocket: websockets.ClientConnection):
         """
@@ -111,7 +112,6 @@ class Router:
         while True:
             while len(self.message_queue) > 0:
                 queued_message = self.message_queue.popleft()
-                print(queued_message)
                 await websocket.send(queued_message.model_dump_json())
                 await asyncio.sleep(0.001)
             await asyncio.sleep(0.1)

@@ -1,13 +1,12 @@
-from typing import Dict, Callable
+import logging
+from typing import Dict
 
-from camera.connection import CameraConnection
-from camera.session import CameraSession
 from communication_protocol.communication_protocol import Message
 from communication_protocol.message_event import MessageEvent
-from communication_protocol.message_type import MessageType
 from subprocess import Popen, DEVNULL, TimeoutExpired
 import asyncio
 
+logger = logging.getLogger(__name__)
 
 class CameraManager:
     """
@@ -39,10 +38,9 @@ class CameraManager:
         camera_id = int(message.payload["id"])
         rtsp = message.payload["rtsp"]
         if rtsp in self.opened_stream:
-            print(f"{self.opened_stream[rtsp].poll()=}")
             if self.opened_stream[rtsp].poll() is None:
                 return
-
+        logger.info(f"Starting stream for camera {rtsp}")
         cmd = [
             "ffmpeg",
             "-rtsp_transport",
