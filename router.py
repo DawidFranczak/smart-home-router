@@ -7,10 +7,13 @@ import websockets
 from websockets import InvalidStatus
 from websockets.exceptions import ConnectionClosedError
 from camera.manager import CameraManager
-from communication_protocol.message import Message
-from communication_protocol.message_event import MessageEvent
+from device_message.device_message import DeviceMessage
+from device_message.enums import MessageEvent, MessageCommand
 from webapp.webapp import Webapp
+from router_message import RouterMessage, RouterMessageType
+
 logger = logging.getLogger(__name__)
+
 
 class Router:
     """
@@ -33,7 +36,7 @@ class Router:
 
         self.uri = uri
         self.send_to_device = None
-        self.message_queue: Deque[Message] = deque()
+        self.message_queue: Deque[DeviceMessage] = deque()
         self.camera_manager = camera_manager
         self.webapp = webapp
 
@@ -85,13 +88,17 @@ class Router:
 
         async for message in websocket:
             try:
-                message = Message.model_validate_json(message)
-                if message.message_event == MessageEvent.UPDATE_FIRMWARE:
-                    asyncio.create_task(self.webapp.download_if_needed(message))
-                elif message.device_id == "camera":
+                message = RouterMessage.validate_json(message)
+                print(f"From server: {message}")
+                if message.target == RouterMessageType.DEVICE.value:
+                    if message.payload.command == MessageCommand.UPDATE_FIRMWARE:
+                        asyncio.create_task(
+                            self.webapp.download_if_needed(message.payload)
+                        )
+                    else:
+                        self.send_to_device(message.payload)
+                elif message.target == RouterMessageType.CAMERA.value:
                     asyncio.create_task(self.camera_manager.on_message(message))
-                else:
-                    self.send_to_device(message)
 
             except Exception as e:
                 logger.error(f"Error processing incoming message: {e}")
@@ -112,11 +119,12 @@ class Router:
         while True:
             while len(self.message_queue) > 0:
                 queued_message = self.message_queue.popleft()
+                print(f"To server: {queued_message}")
                 await websocket.send(queued_message.model_dump_json())
-                await asyncio.sleep(0.001)
+                await asyncio.sleep(0.01)
             await asyncio.sleep(0.1)
 
-    def send_to_server(self, message: Message):
+    def send_to_server(self, message: DeviceMessage):
         """
         Queue a message for sending to the server.
 

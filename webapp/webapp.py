@@ -2,7 +2,8 @@ import aiohttp
 from aiohttp import web
 import os
 import socket
-from communication_protocol.communication_protocol import Message
+
+from device_message.device_message import DeviceMessage
 from mqtt import Mqtt
 
 
@@ -35,14 +36,14 @@ class Webapp:
         self.address = f"http://{local_ip}:{port}/ota"
         await site.start()
 
-    async def download_if_needed(self, message: Message) -> None:
-        device_fun = message.payload.get("to_device")
+    async def download_if_needed(self, message: DeviceMessage) -> None:
+        device_chip = message.payload.get("to_device")
         version = message.payload.get("version")
         url = message.payload.get("url")
-        if not device_fun or not version or not url:
+        if not device_chip or not version or not url:
             return
 
-        filename = f"{device_fun}_{version}.bin"
+        filename = f"{device_chip}_{version}.bin"
         filepath = os.path.join(self.FIRMWARE_DIR, filename)
         if not os.path.exists(filepath):
             async with aiohttp.ClientSession() as session:
