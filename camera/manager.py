@@ -1,12 +1,16 @@
 import logging
 from typing import Dict
 
-from communication_protocol.communication_protocol import Message
-from communication_protocol.message_event import MessageEvent
+from camera.message_payload import CameraRouterMessagePayload
+from device_message.device_message import DeviceMessage
+from device_message.enums import CameraCommand
 from subprocess import Popen, DEVNULL, TimeoutExpired
 import asyncio
 
+from router_message import CameraRouterMessage
+
 logger = logging.getLogger(__name__)
+
 
 class CameraManager:
     """
@@ -26,18 +30,21 @@ class CameraManager:
         """
         Initialize the camera manager with empty connection and session pools.
         """
-        self.opened_stream: Dict[str:Popen] = {}
+        self.opened_stream: Dict[str, Popen] = {}
         self.lock = asyncio.Lock()
 
-    async def on_message(self, message: Message):
+    async def on_message(self, message: CameraRouterMessage):
         async with self.lock:
-            if message.message_event == MessageEvent.CAMERA_START:
-                await self.start_stream(message)
+            if message.command == CameraCommand.CAMERA_START:
+                await self.start_stream(message.payload)
 
-    async def start_stream(self, message: Message):
-        camera_id = int(message.payload["id"])
-        rtsp = message.payload["rtsp"]
+    async def start_stream(self, message: CameraRouterMessagePayload):
+        if not message.rtsp:
+            return
+        camera_id = message.id
+        rtsp = message.rtsp
         if rtsp in self.opened_stream:
+            logger.info(f"pool for {rtsp} is {self.opened_stream[rtsp].poll()}")
             if self.opened_stream[rtsp].poll() is None:
                 return
         logger.info(f"Starting stream for camera {rtsp}")
@@ -66,8 +73,8 @@ class CameraManager:
         proc = Popen(cmd, stdout=DEVNULL, stderr=DEVNULL)
         self.opened_stream[rtsp] = proc
 
-    async def stop_stream(self, message: Message):
-        camera_id = int(message.payload["id"])
+    async def stop_stream(self, message: CameraRouterMessage):
+        camera_id = int(message.payload.id)
         if camera_id not in self.opened_stream:
             return
         self.opened_stream[camera_id][1] -= 1

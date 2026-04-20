@@ -5,10 +5,12 @@ from typing import Deque
 
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import PacketTypes, Properties
-from communication_protocol.communication_protocol import Message
-from communication_protocol.message_event import MessageEvent
+
+from device_message.device_message import DeviceMessage
+from device_message.enums import MessageCommand
 
 logger = logging.getLogger(__name__)
+
 
 class Mqtt:
     def __init__(self, ip: str, port: int, keepalive: int = 60):
@@ -16,7 +18,7 @@ class Mqtt:
         self.port = port
         self.keepalive = keepalive
         self.send_to_server = None
-        self.message_queue: Deque[Message] = deque()
+        self.message_queue: Deque[DeviceMessage] = deque()
 
         self.client = mqtt.Client(
             client_id="Hub",
@@ -47,16 +49,18 @@ class Mqtt:
         if not message.payload:
             return
         try:
-            self.send_to_server(Message.model_validate_json(message.payload.decode()))
+            self.send_to_server(
+                DeviceMessage.model_validate_json(message.payload.decode())
+            )
         except Exception as e:
             logger.error("Error processing message:", e)
 
-    def send_to_device(self, message: Message):
+    def send_to_device(self, message: DeviceMessage):
 
         if not self.client.is_connected():
             self.message_queue.append(message)
             return
-        if message.message_event == MessageEvent.GET_CONNECTED_DEVICES.value:
+        if message.command == MessageCommand.GET_CONNECTED_DEVICES.value:
             self.client.publish(f"device/broadcast/", message.model_dump_json(), qos=1)
             return
         self.client.publish(
