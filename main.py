@@ -4,7 +4,7 @@ from pathlib import Path
 
 from camera.manager import CameraManager
 from mqtt import Mqtt
-from router import Router
+from router.router import Router
 from webapp.webapp import Webapp
 import logging
 from logging.handlers import RotatingFileHandler
@@ -18,8 +18,11 @@ LOGGER_LEVEL = os.getenv("LOGGER_LEVEL", None)
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
+
 def format_loggers():
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     logger = logging.getLogger()
     logger_level = LOGGER_LEVEL.upper() if LOGGER_LEVEL else "INFO"
     logger.setLevel(logger_level)
@@ -30,9 +33,9 @@ def format_loggers():
 
     file_handler = RotatingFileHandler(
         filename=LOG_DIR / "router.log",
-        maxBytes=10*1024*1024,
+        maxBytes=10 * 1024 * 1024,
         backupCount=5,
-        encoding="utf-8"
+        encoding="utf-8",
     )
 
     file_handler.setFormatter(formatter)
@@ -43,13 +46,11 @@ def format_loggers():
 
 
 async def main():
-    server_url = SERVER_URL+ROUTER_MAC+"/"
+    server_url = SERVER_URL + ROUTER_MAC + "/"
     camera_manager = CameraManager()
     mqtt = Mqtt(MQTT_URL, MQTT_PORT)
     webapp = Webapp(mqtt)
-    router = Router(
-        server_url, camera_manager, webapp
-    )
+    router = Router(server_url, camera_manager, webapp)
     mqtt.bind_router(router)
     router.bind_broker(mqtt)
     mqtt.start()

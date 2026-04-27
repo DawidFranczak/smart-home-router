@@ -2,12 +2,11 @@ import logging
 from typing import Dict
 
 from camera.message_payload import CameraRouterMessagePayload
-from device_message.device_message import DeviceMessage
 from device_message.enums import CameraCommand
 from subprocess import Popen, DEVNULL, TimeoutExpired
 import asyncio
 
-from router_message import CameraRouterMessage
+from router.message import CameraRouterMessage
 
 logger = logging.getLogger(__name__)
 
