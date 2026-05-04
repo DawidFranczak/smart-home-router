@@ -5,6 +5,7 @@ from typing import Deque
 
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import PacketTypes, Properties
+from pydantic import ValidationError
 
 from device_message.device_message import DeviceMessage
 from device_message.enums import MessageCommand
@@ -52,8 +53,12 @@ class Mqtt:
             self.send_to_server(
                 DeviceMessage.model_validate_json(message.payload.decode())
             )
+        except ValidationError as e:
+            logger.error(f"Invalid message format: {e}", exc_info=True)
         except Exception as e:
-            logger.error("Error processing message:", e)
+            logger.error(f"Error processing incoming message: {e}", exc_info=True)
+        except KeyError as e:
+            logger.error(f"Missing required field in message: {e}", exc_info=True)
 
     def send_to_device(self, message: DeviceMessage):
 
