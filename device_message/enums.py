@@ -76,6 +76,7 @@ class MessageCommand(StrEnum):
 
     # CPU action
     UPDATE_FIRMWARE = "update_firmware"
+    UPDATE_FIRMWARE_ERROR = "update_firmware_error"
     UPDATE_PERIPHERAL = "update_peripheral"
     UPDATE_RULE = "update_rule"
     SYNC_START = "sync_start"

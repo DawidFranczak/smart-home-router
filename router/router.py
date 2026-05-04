@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 
 import websockets
+from pydantic import ValidationError
 from websockets import InvalidStatus
 from websockets.exceptions import ConnectionClosedError
 from camera.manager import CameraManager
@@ -68,12 +69,12 @@ class Router:
                 elif isinstance(message, AckRouterMessage):
                     if message.message_id in self.message_storage:
                         del self.message_storage[message.message_id]
-
+            except ValidationError as e:
+                logger.error(f"Invalid message format: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Error processing incoming message: {e}")
-                continue
+                logger.error(f"Error processing incoming message: {e}", exc_info=True)
             except KeyError as e:
-                logger.error(f"Missing required field in message: {e}")
+                logger.error(f"Missing required field in message: {e}", exc_info=True)
 
     async def _send_to_server(self, websocket: websockets.ClientConnection):
         while True:
